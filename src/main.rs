@@ -1,7 +1,19 @@
 mod mosaic;
 mod osm;
 
-use bevy::prelude::*;
+use bevy::{
+    core_pipeline::{
+        core_2d::graph::Node2d,
+        fullscreen_material::{FullscreenMaterial, FullscreenMaterialPlugin},
+    },
+    prelude::*,
+    render::{
+        extract_component::ExtractComponent,
+        render_graph::{InternedRenderLabel, RenderLabel},
+        render_resource::ShaderType,
+    },
+    shader::ShaderRef,
+};
 use mosaic::CellType;
 use std::collections::{HashMap, HashSet};
 use std::sync::{mpsc, Mutex};
@@ -88,6 +100,28 @@ struct TileMaterials {
 #[derive(Resource)]
 struct TileMesh(Handle<Mesh>);
 
+#[derive(Component, ExtractComponent, Clone, Copy, ShaderType, Default)]
+struct MosaicPostProcess {
+    blur_radius: f32,
+    tone_intensity: f32,
+    tone_scale: f32,
+    _padding: f32,
+}
+
+impl FullscreenMaterial for MosaicPostProcess {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/mosaic_post.wgsl".into()
+    }
+
+    fn node_edges() -> Vec<InternedRenderLabel> {
+        vec![
+            Node2d::Tonemapping.intern(),
+            Self::node_label().intern(),
+            Node2d::EndMainPassPostProcessing.intern(),
+        ]
+    }
+}
+
 fn main() {
     let (req_tx, req_rx) = mpsc::channel::<ChunkRequest>();
     let (res_tx, res_rx) = mpsc::channel::<ChunkResult>();
@@ -124,14 +158,17 @@ fn main() {
     });
 
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Mosaik Map".into(),
-                resolution: (1200u32, 900u32).into(),
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Mosaik Map".into(),
+                    resolution: (1200u32, 900u32).into(),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
+            FullscreenMaterialPlugin::<MosaicPostProcess>::default(),
+        ))
         .insert_resource(ChunkManager {
             loaded: HashMap::new(),
             pending: HashSet::new(),
@@ -149,7 +186,15 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    commands.spawn(Camera2d);
+    commands.spawn((
+        Camera2d,
+        MosaicPostProcess {
+            blur_radius: 1.5,
+            tone_intensity: 0.6,
+            tone_scale: 8.0,
+            _padding: 0.0,
+        },
+    ));
 
     commands.insert_resource(TileMesh(meshes.add(Rectangle::new(TILE_SIZE, TILE_SIZE))));
 
