@@ -105,7 +105,9 @@ struct MosaicPostProcess {
     blur_radius: f32,
     tone_intensity: f32,
     tone_scale: f32,
-    _padding: f32,
+    camera_scale: f32,
+    camera_pos: Vec2,
+    _padding: Vec2,
 }
 
 impl FullscreenMaterial for MosaicPostProcess {
@@ -176,7 +178,7 @@ fn main() {
             sender: req_tx,
         })
         .add_systems(Startup, setup)
-        .add_systems(Update, camera_controls)
+        .add_systems(Update, (camera_controls, update_post_process))
         .add_systems(Update, (request_chunks, receive_chunks, unload_distant_chunks))
         .run();
 }
@@ -192,7 +194,9 @@ fn setup(
             blur_radius: 1.5,
             tone_intensity: 0.6,
             tone_scale: 8.0,
-            _padding: 0.0,
+            camera_scale: 1.0,
+            camera_pos: Vec2::ZERO,
+            _padding: Vec2::ZERO,
         },
     ));
 
@@ -255,6 +259,18 @@ fn camera_controls(
         if kb.pressed(KeyCode::KeyE) {
             ortho.scale *= 1.0 - 1.5 * time.delta_secs();
         }
+    }
+}
+
+fn update_post_process(
+    mut query: Query<(&Transform, &Projection, &mut MosaicPostProcess), With<Camera2d>>,
+) {
+    for (transform, projection, mut settings) in &mut query {
+        settings.camera_pos = Vec2::new(transform.translation.x, transform.translation.y);
+        settings.camera_scale = match projection {
+            Projection::Orthographic(ortho) => ortho.scale,
+            _ => 1.0,
+        };
     }
 }
 

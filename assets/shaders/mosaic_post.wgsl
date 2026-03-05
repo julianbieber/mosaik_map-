@@ -7,7 +7,9 @@ struct MosaicSettings {
     blur_radius: f32,
     tone_intensity: f32,
     tone_scale: f32,
-    _padding: f32,
+    camera_scale: f32,
+    camera_pos: vec2<f32>,
+    _padding: vec2<f32>,
 }
 @group(0) @binding(2) var<uniform> settings: MosaicSettings;
 
@@ -46,8 +48,14 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     }
     color = color / total_weight;
 
-    // Tone variation: subtle hue/brightness shift based on screen position
-    let grid = floor(uv * tex_size / settings.tone_scale);
+    // Convert screen UV to world position for stable noise
+    // UV (0,0) is top-left, (1,1) is bottom-right
+    // World pos = camera_pos + (uv - 0.5) * viewport_size * camera_scale
+    let centered_uv = uv - vec2<f32>(0.5);
+    let world_pos = settings.camera_pos + centered_uv * tex_size * settings.camera_scale;
+
+    // Tone variation grid in world space
+    let grid = floor(world_pos / settings.tone_scale);
     let noise = hash21(grid);
     let noise2 = hash22(grid + vec2<f32>(42.0, 17.0));
 
