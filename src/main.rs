@@ -112,7 +112,8 @@ struct MosaicPostProcess {
     tone_scale: f32,
     camera_scale: f32,
     camera_pos: Vec2,
-    _padding: Vec2,
+    voronoi_scale: f32,
+    _padding: f32,
 }
 
 impl FullscreenMaterial for MosaicPostProcess {
@@ -209,7 +210,8 @@ fn setup(
             tone_scale: 8.0,
             camera_scale: 1.0,
             camera_pos: Vec2::ZERO,
-            _padding: Vec2::ZERO,
+            voronoi_scale: 64.0,
+            _padding: 0.0,
         },
     ));
 
@@ -238,7 +240,7 @@ fn setup(
 
     commands.spawn((
         Text::new(
-            "WASD: pan | QE: zoom | Mosaik Map\n\
+            "WASD: pan | QE: zoom | RF: voronoi size\n\
              Gray=Street  Brown=Railway  Blue=Water\n\
              Green=Park  Beige=Residential  Tan=Building",
         ),
@@ -283,6 +285,17 @@ fn camera_controls(
         if kb.pressed(KeyCode::KeyE) {
             ortho.scale *= 1.0 - 1.5 * time.delta_secs();
         }
+    }
+
+    // Voronoi scale controls
+    if kb.pressed(KeyCode::KeyR) {
+        post_process.voronoi_scale *= 1.0 + 1.5 * time.delta_secs();
+        println!("Voronoi scale: {:.1}", post_process.voronoi_scale);
+    }
+    if kb.pressed(KeyCode::KeyF) {
+        post_process.voronoi_scale *= 1.0 - 1.5 * time.delta_secs();
+        post_process.voronoi_scale = post_process.voronoi_scale.max(4.0);
+        println!("Voronoi scale: {:.1}", post_process.voronoi_scale);
     }
 
     // Sync camera state to post-process shader

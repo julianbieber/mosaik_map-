@@ -86,10 +86,10 @@ out body;"#,
         if data.contains("<osm") {
             std::fs::write(cache_path, &data)?;
             println!("Cached OSM data to {cache_file}");
+            (data, false)
         } else {
-            eprintln!("Overpass API error response (rate limit?), skipping cache");
+            return Err("Overpass API error response (rate limit?)".into());
         }
-        (data, false)
     };
 
     Ok((parse_osm_xml(&resp, [min_lat, min_lon, max_lat, max_lon])?, was_cached))
