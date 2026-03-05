@@ -13,15 +13,36 @@ struct MosaicSettings {
 }
 @group(0) @binding(2) var<uniform> settings: MosaicSettings;
 
-// Hash-based pseudo-random for tone variation
-fn hash21(p: vec2<f32>) -> f32 {
-    var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
-    p3 = p3 + dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
+// R2 quasi-random sequence — blue-noise-like low-discrepancy distribution
+fn r2_noise(cell: vec2<f32>) -> f32 {
+    return fract(dot(cell, vec2<f32>(0.7548776662, 0.5698402910)));
 }
 
-fn hash22(p: vec2<f32>) -> vec2<f32> {
-    return vec2<f32>(hash21(p), hash21(p + vec2<f32>(127.1, 311.7)));
+fn r2_noise2(cell: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(
+        r2_noise(cell),
+        r2_noise(cell + vec2<f32>(0.5, 0.5)),
+    );
+}
+
+// FBM using R2 noise at multiple octaves for organic variation
+fn fbm(p: vec2<f32>) -> f32 {
+    var val = 0.0;
+    var amp = 0.5;
+    var pos = p;
+    for (var i = 0; i < 4; i = i + 1) {
+        val = val + amp * r2_noise(floor(pos));
+        pos = pos * 2.0 + vec2<f32>(1.7, 3.1);
+        amp = amp * 0.5;
+    }
+    return val;
+}
+
+fn fbm2(p: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(
+        fbm(p),
+        fbm(p + vec2<f32>(42.0, 17.0)),
+    );
 }
 
 @fragment
@@ -30,8 +51,8 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let texel = 1.0 / tex_size;
     let uv = in.uv;
 
-    // Gaussian-ish blur - scale radius with zoom so blur covers same world area
-    let r = clamp(settings.blur_radius / settings.camera_scale, 0.5, 8.0);
+    // Fixed screen-pixel blur — zooming out blurs a larger world area
+    let r = settings.blur_radius;
     var color = vec3<f32>(0.0);
     var total_weight = 0.0;
 
@@ -54,10 +75,10 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let centered_uv = uv - vec2<f32>(0.5);
     let world_pos = settings.camera_pos + centered_uv * tex_size * settings.camera_scale;
 
-    // Tone variation grid in world space (tone_scale is in world units)
-    let grid = floor(world_pos / settings.tone_scale);
-    let noise = hash21(grid);
-    let noise2 = hash22(grid + vec2<f32>(42.0, 17.0));
+    // FBM tone variation in world space for organic feel
+    let scaled_pos = world_pos / settings.tone_scale;
+    let noise = fbm(scaled_pos);
+    let noise2 = fbm2(scaled_pos + vec2<f32>(42.0, 17.0));
 
     // Warm/cool shift
     let warm = vec3<f32>(1.02, 1.0, 0.97);

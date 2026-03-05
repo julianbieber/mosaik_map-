@@ -225,6 +225,17 @@ fn setup(
         empty: materials.add(Color::srgb(0.93, 0.91, 0.88)),
     });
 
+    // Red marker dot
+    let marker_lat = 49.98165504148375;
+    let marker_lon = 8.281081709793526;
+    let marker_x = ((marker_lon - CENTER_LON) * SCALE_X) as f32;
+    let marker_y = ((marker_lat - CENTER_LAT) * SCALE_Y) as f32;
+    commands.spawn((
+        Mesh2d(meshes.add(Circle::new(6.0))),
+        MeshMaterial2d(materials.add(Color::srgb(0.9, 0.15, 0.15))),
+        Transform::from_xyz(marker_x, marker_y, 1.0),
+    ));
+
     commands.spawn((
         Text::new(
             "WASD: pan | QE: zoom | Mosaik Map\n\
