@@ -30,14 +30,14 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let texel = 1.0 / tex_size;
     let uv = in.uv;
 
-    // Gaussian-ish blur by sampling neighbors
-    let r = settings.blur_radius;
+    // Gaussian-ish blur - scale radius with zoom so blur covers same world area
+    let r = clamp(settings.blur_radius / settings.camera_scale, 0.5, 8.0);
     var color = vec3<f32>(0.0);
     var total_weight = 0.0;
 
-    // 5x5 weighted blur kernel
-    for (var dy = -2i; dy <= 2i; dy = dy + 1i) {
-        for (var dx = -2i; dx <= 2i; dx = dx + 1i) {
+    // 9x9 weighted blur kernel
+    for (var dy = -4i; dy <= 4i; dy = dy + 1i) {
+        for (var dx = -4i; dx <= 4i; dx = dx + 1i) {
             let offset = vec2<f32>(f32(dx), f32(dy)) * texel * r;
             let dist = length(vec2<f32>(f32(dx), f32(dy)));
             let weight = exp(-dist * dist * 0.5);
@@ -54,7 +54,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let centered_uv = uv - vec2<f32>(0.5);
     let world_pos = settings.camera_pos + centered_uv * tex_size * settings.camera_scale;
 
-    // Tone variation grid in world space
+    // Tone variation grid in world space (tone_scale is in world units)
     let grid = floor(world_pos / settings.tone_scale);
     let noise = hash21(grid);
     let noise2 = hash22(grid + vec2<f32>(42.0, 17.0));

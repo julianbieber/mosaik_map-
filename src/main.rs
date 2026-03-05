@@ -35,6 +35,10 @@ const LOAD_RADIUS: i32 = 2;
 // Despawn chunks further than this
 const UNLOAD_RADIUS: i32 = 4;
 
+// Overlap: download extra area around each chunk to avoid boundary clipping
+const OVERLAP_LAT: f64 = CHUNK_LAT * 0.15;
+const OVERLAP_LON: f64 = CHUNK_LON * 0.15;
+
 // Derived: world units per degree
 const SCALE_X: f64 = (TILES_PER_CHUNK as f64 * TILE_SIZE as f64) / CHUNK_LON;
 const SCALE_Y: f64 = (TILES_PER_CHUNK as f64 * TILE_SIZE as f64) / CHUNK_LAT;
@@ -84,6 +88,7 @@ struct ChunkResult {
     cx: i32,
     cy: i32,
     cells: Vec<CellType>,
+    failed: bool,
 }
 
 #[derive(Resource)]
@@ -131,16 +136,24 @@ fn main() {
     // Background loader thread
     std::thread::spawn(move || {
         for req in req_rx {
-            match osm::download_osm_data(req.min_lat, req.min_lon, req.max_lat, req.max_lon) {
+            // Download with overlap padding, rasterize to exact chunk bbox
+            let dl_result = osm::download_osm_data(
+                req.min_lat - OVERLAP_LAT,
+                req.min_lon - OVERLAP_LON,
+                req.max_lat + OVERLAP_LAT,
+                req.max_lon + OVERLAP_LON,
+            );
+            let render_bbox = [req.min_lat, req.min_lon, req.max_lat, req.max_lon];
+            match dl_result {
                 Ok((osm_data, was_cached)) => {
                     let grid =
-                        mosaic::build_grid(&osm_data, TILES_PER_CHUNK, TILES_PER_CHUNK);
+                        mosaic::build_grid(&osm_data, TILES_PER_CHUNK, TILES_PER_CHUNK, render_bbox);
                     let _ = res_tx.send(ChunkResult {
                         cx: req.cx,
                         cy: req.cy,
                         cells: grid.cells,
+                        failed: false,
                     });
-                    // Only delay after actual network requests
                     if !was_cached {
                         std::thread::sleep(std::time::Duration::from_secs(2));
                     }
@@ -150,10 +163,10 @@ fn main() {
                     let _ = res_tx.send(ChunkResult {
                         cx: req.cx,
                         cy: req.cy,
-                        cells: vec![CellType::Empty; TILES_PER_CHUNK * TILES_PER_CHUNK],
+                        cells: Vec::new(),
+                        failed: true,
                     });
-                    // Also delay after failures to back off
-                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    std::thread::sleep(std::time::Duration::from_secs(5));
                 }
             }
         }
@@ -191,7 +204,7 @@ fn setup(
     commands.spawn((
         Camera2d,
         MosaicPostProcess {
-            blur_radius: 1.5,
+            blur_radius: 3.0,
             tone_intensity: 0.6,
             tone_scale: 8.0,
             camera_scale: 1.0,
@@ -324,6 +337,11 @@ fn receive_chunks(
     for result in results {
         let key = (result.cx, result.cy);
         manager.pending.remove(&key);
+
+        if result.failed {
+            // Don't draw anything - chunk will be re-requested next check
+            continue;
+        }
 
         let (origin_x, origin_y) = chunk_world_origin(result.cx, result.cy);
         let mut entities = Vec::new();

@@ -102,6 +102,7 @@ fn parse_osm_xml(
     let doc = roxmltree::Document::parse(xml)?;
     let mut nodes = HashMap::new();
     let mut ways = Vec::new();
+    let mut way_nodes: HashMap<i64, Vec<i64>> = HashMap::new();
 
     for node_elem in doc.descendants().filter(|n| n.has_tag_name("node")) {
         if let (Some(id), Some(lat), Some(lon)) = (
@@ -123,6 +124,12 @@ fn parse_osm_xml(
             .filter_map(|c| c.attribute("ref")?.parse().ok())
             .collect();
 
+        if let Some(id) = way_elem.attribute("id") {
+            if let Ok(way_id) = id.parse::<i64>() {
+                way_nodes.insert(way_id, node_ids.clone());
+            }
+        }
+
         let tags: HashMap<&str, &str> = way_elem
             .children()
             .filter(|c| c.has_tag_name("tag"))
@@ -135,7 +142,116 @@ fn parse_osm_xml(
         }
     }
 
+    // Parse relations to assemble multipolygons (rivers, large parks, etc.)
+    for rel_elem in doc.descendants().filter(|n| n.has_tag_name("relation")) {
+        let tags: HashMap<&str, &str> = rel_elem
+            .children()
+            .filter(|c| c.has_tag_name("tag"))
+            .filter_map(|c| Some((c.attribute("k")?, c.attribute("v")?)))
+            .collect();
+
+        let feature = classify_way(&tags);
+        if feature == FeatureType::Unknown {
+            continue;
+        }
+
+        // Collect outer member way IDs
+        let outer_way_ids: Vec<i64> = rel_elem
+            .children()
+            .filter(|c| c.has_tag_name("member"))
+            .filter(|c| c.attribute("type") == Some("way"))
+            .filter(|c| {
+                let role = c.attribute("role").unwrap_or("outer");
+                role == "outer" || role == ""
+            })
+            .filter_map(|c| c.attribute("ref")?.parse().ok())
+            .collect();
+
+        // Assemble outer ways into closed rings
+        let rings = assemble_rings(&outer_way_ids, &way_nodes);
+        for ring in rings {
+            ways.push(Way {
+                node_ids: ring,
+                feature,
+            });
+        }
+    }
+
     Ok(OsmData { nodes, ways, bbox })
+}
+
+/// Chain way segments together into closed rings.
+/// Each way is a sequence of node IDs. Ways connect where the last node of one
+/// equals the first node of another.
+fn assemble_rings(way_ids: &[i64], way_nodes: &HashMap<i64, Vec<i64>>) -> Vec<Vec<i64>> {
+    let mut remaining: Vec<Vec<i64>> = way_ids
+        .iter()
+        .filter_map(|id| way_nodes.get(id).cloned())
+        .filter(|ns| ns.len() >= 2)
+        .collect();
+
+    let mut rings = Vec::new();
+
+    while !remaining.is_empty() {
+        let mut ring = remaining.remove(0);
+
+        // Keep trying to extend the ring
+        let mut changed = true;
+        while changed {
+            changed = false;
+            let front = *ring.first().unwrap();
+            let back = *ring.last().unwrap();
+
+            // Ring is closed
+            if front == back && ring.len() >= 4 {
+                break;
+            }
+
+            for i in 0..remaining.len() {
+                let seg = &remaining[i];
+                let seg_front = *seg.first().unwrap();
+                let seg_back = *seg.last().unwrap();
+
+                if seg_front == back {
+                    // Append segment (skip first node, it's the junction)
+                    let mut seg = remaining.remove(i);
+                    seg.remove(0);
+                    ring.append(&mut seg);
+                    changed = true;
+                    break;
+                } else if seg_back == back {
+                    // Append reversed segment
+                    let mut seg = remaining.remove(i);
+                    seg.reverse();
+                    seg.remove(0);
+                    ring.append(&mut seg);
+                    changed = true;
+                    break;
+                } else if seg_back == front {
+                    // Prepend segment
+                    let mut seg = remaining.remove(i);
+                    seg.pop();
+                    seg.append(&mut ring);
+                    ring = seg;
+                    changed = true;
+                    break;
+                } else if seg_front == front {
+                    // Prepend reversed segment
+                    let mut seg = remaining.remove(i);
+                    seg.reverse();
+                    seg.pop();
+                    seg.append(&mut ring);
+                    ring = seg;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        rings.push(ring);
+    }
+
+    rings
 }
 
 fn classify_way(tags: &HashMap<&str, &str>) -> FeatureType {
