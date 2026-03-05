@@ -178,7 +178,7 @@ fn main() {
             sender: req_tx,
         })
         .add_systems(Startup, setup)
-        .add_systems(Update, (camera_controls, update_post_process))
+        .add_systems(Update, camera_controls)
         .add_systems(Update, (request_chunks, receive_chunks, unload_distant_chunks))
         .run();
 }
@@ -228,11 +228,11 @@ fn setup(
 }
 
 fn camera_controls(
-    camera: Single<(&mut Transform, &mut Projection), With<Camera2d>>,
+    camera: Single<(&mut Transform, &mut Projection, &mut MosaicPostProcess), With<Camera2d>>,
     time: Res<Time>,
     kb: Res<ButtonInput<KeyCode>>,
 ) {
-    let (ref mut transform, ref mut projection) = camera.into_inner();
+    let (ref mut transform, ref mut projection, ref mut post_process) = camera.into_inner();
 
     let scale = match projection.as_ref() {
         Projection::Orthographic(ortho) => ortho.scale,
@@ -260,18 +260,13 @@ fn camera_controls(
             ortho.scale *= 1.0 - 1.5 * time.delta_secs();
         }
     }
-}
 
-fn update_post_process(
-    mut query: Query<(&Transform, &Projection, &mut MosaicPostProcess), With<Camera2d>>,
-) {
-    for (transform, projection, mut settings) in &mut query {
-        settings.camera_pos = Vec2::new(transform.translation.x, transform.translation.y);
-        settings.camera_scale = match projection {
-            Projection::Orthographic(ortho) => ortho.scale,
-            _ => 1.0,
-        };
-    }
+    // Sync camera state to post-process shader
+    post_process.camera_pos = Vec2::new(transform.translation.x, transform.translation.y);
+    post_process.camera_scale = match projection.as_ref() {
+        Projection::Orthographic(ortho) => ortho.scale,
+        _ => 1.0,
+    };
 }
 
 fn request_chunks(
